@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560">
+ <defs>
+  <linearGradient id="room" x2="0" y2="1"><stop stop-color="#22272f"/><stop offset="1" stop-color="#37302c"/></linearGradient>
+  <radialGradient id="light"><stop stop-color="#e69a52" stop-opacity=".5"/><stop offset="1" stop-color="#df9450" stop-opacity="0"/></radialGradient>
+  <linearGradient id="fire" x2="0" y2="1"><stop stop-color="#ffbf6c"/><stop offset=".5" stop-color="#ed873b"/><stop offset="1" stop-color="#a24229"/></linearGradient>
+  <linearGradient id="steel" x2="1" y2=".8"><stop stop-color="#a8a7a2"/><stop offset=".35" stop-color="#58616c"/><stop offset="1" stop-color="#262e38"/></linearGradient>
+  <linearGradient id="window" x2="0" y2="1"><stop stop-color="#737681"/><stop offset="1" stop-color="#ce9b69"/></linearGradient>
+  <linearGradient id="floor" x2="0" y2="1"><stop stop-color="#49413a"/><stop offset="1" stop-color="#202429"/></linearGradient>
+  <pattern id="bricks" width="144" height="96" patternUnits="userSpaceOnUse"><path d="M0 0h144v48H0ZM-72 48H72v48H-72ZM72 48h144v48H72Z" fill="#383a3f" stroke="#24272e" stroke-width="6"/><path d="M6 8h129M7 56h54m18 0h57" stroke="#4c4945" stroke-width="2" opacity=".5"/><path d="m20 23 53-4m22 11h25m-6 45-48 6m-19-14H9" stroke="#292c31" stroke-width="3" opacity=".6"/></pattern>
+  <pattern id="wood" width="30" height="120" patternUnits="userSpaceOnUse"><rect width="30" height="120" fill="#4d3930"/><path d="M2 0v120m15-120 3 45-4 31 2 44M27 0v120" stroke="#302a29" stroke-width="3"/></pattern>
+  <filter id="glow"><feGaussianBlur stdDeviation="8"/></filter>
+ </defs>
+ <rect width="1000" height="560" fill="url(#room)"/>
+ <rect x="0" y="30" width="1000" height="359" fill="url(#bricks)"/>
+ <path d="M0 0h1000v44H0ZM34 0h32v393H34ZM935 0h35v410h-35Z" fill="#26262a"/>
+ <path d="M45 0h7v390M947 0h7v400M0 30h1000" stroke="#75614c" opacity=".3" stroke-width="6"/>
+ <path d="M0 390h1000v170H0Z" fill="url(#floor)"/>
+ <path d="m-200 560 490-170M-10 560l380-170m-50 170 170-170m30 170 30-170m250 170L650 390m390 170L770 390M0 446h1000M0 510h1000" stroke="#5c4b3d" opacity=".34" stroke-width="3"/>
+ <!-- 傍晚的拱形窗 -->
+ <path d="M90 305V134a76 76 0 0 1 152 0v171Z" fill="#22252c" stroke="#635947" stroke-width="17"/>
+ <path d="M105 291V136a61 61 0 0 1 122 0v155Z" fill="url(#window)"/>
+ <path d="m105 224 22-54 15 57 26-94 24 81 13-34 22 73v38H105Z" fill="#5c6468"/>
+ <path d="M107 280h119v11H107Z" fill="#92927d"/><path d="M166 75v222m-61-109h123m-123 69h123" stroke="#33353b" stroke-width="9"/>
+ <path d="M80 306h170v17H80Z" fill="#70604e"/><path d="m230 157 343 320H290L112 282Z" fill="#cfb079" opacity=".035"/>
+ <!-- 剑架 -->
+ <path d="M295 147h206v19H295m-8 135h224v14H287" fill="#2b2423" stroke="#68503c" stroke-width="4"/>
+ <g transform="translate(334 104) rotate(-9)"><path d="m0 0 10 22-3 132H-7l-3-132Z" fill="url(#steel)"/><path d="M0 9v138" stroke="#bcbcb1" opacity=".5"/><path d="m-26 151 9-6 17 6 17-6 9 6-3 10-23-7-23 7Z" fill="#ad8a55"/><path d="M-5 156h10v38H-5Z" fill="#543932"/><path d="m-10 192 10 13 10-13-10-8Z" fill="#b7a389"/></g>
+ <g transform="translate(407 95) rotate(6)"><path d="m0 0 17 24-7 143H-10l-7-143Z" fill="url(#steel)"/><path d="M0 6v150" stroke="#d7cab3" opacity=".5"/><path d="m-31 166 8-12 23 8 23-8 8 12-31-5Z" fill="#b99567"/><path d="M-6 164h12v35H-6Z" fill="#343a48"/><path d="m-10 198 10 10 10-10-10-5Z" fill="#86a0ac"/></g>
+ <g transform="translate(465 120) rotate(12)"><path d="m0 0 9 17-3 112H-6L-9 17Z" fill="url(#steel)"/><path d="M-20 129h40v8h-40Z" fill="#9c7b50"/><path d="M-4 136h8v30H-4Z" fill="#655348"/><circle cy="171" r="7" fill="#a28764"/></g>
+ <!-- 巨大的石砌锻炉 -->
+ <path d="M601-20h189l20 80-23 38 25 215H566l30-215-21-34Z" fill="#282b30" stroke="#5b5043" stroke-width="6"/>
+ <path d="M599 4h184M586 60h215M597 106h192M590 145h205M585 189h216M580 232h226" stroke="#1d232a" stroke-width="5"/>
+ <path d="M586 67h210M586 198h211" stroke="#867254" stroke-width="3" opacity=".3"/>
+ <path d="M529 352V247c0-61 40-110 121-110s122 49 122 110v105Z" fill="#635748" stroke="#292c30" stroke-width="12"/>
+ <path d="M545 347v-98a105 105 0 0 1 210 0v98Z" fill="#191d22"/>
+ <path d="m551 315 25-61 20 26 19-73 26 62 16-105 28 113 20-55 24 72 14-24 12 69Z" fill="url(#fire)"/>
+ <path d="m576 326 30-68 8 53 31-89 19 83 18-50 15 67 31-42 14 53Z" fill="#ffc374"/>
+ <path d="m602 329 20-27 20 31 14-45 24 44Z" fill="#ffe0a1"/>
+ <ellipse cx="651" cy="310" rx="143" ry="110" fill="url(#light)"/>
+ <ellipse cx="651" cy="342" rx="97" ry="25" fill="#f69741" opacity=".32" filter="url(#glow)"/>
+ <path d="M527 331h246v31H527Z" fill="#51443a" stroke="#98816b" stroke-width="3"/>
+ <path d="M511 360h279v43H511Z" fill="#3e3834" stroke="#645347" stroke-width="4"/>
+ <path d="M549 362v39m49-39v39m52-39v39m51-39v39m47-39v39" stroke="#2a2b2d" stroke-width="5"/>
+ <ellipse cx="636" cy="375" rx="370" ry="230" fill="url(#light)" opacity=".65"/>
+ <!-- 风箱、煤堆 -->
+ <path d="m784 284 88-34 34 67-103 25Z" fill="#604934" stroke="#2e2a29" stroke-width="5"/>
+ <path d="m800 280 17 52m0-57 16 47m0-54 17 49m1-56 17 49m2-56 18 49" stroke="#947156" stroke-width="3"/>
+ <path d="m893 291 57-19 8 28-61 16Z" fill="#483830"/>
+ <path d="m793 406 35-26 14 10 19-21 27 16 21-8 40 35Z" fill="#25272d" stroke="#353538" stroke-width="3"/>
+ <!-- 左侧工作台 -->
+ <path d="M81 331h280v25H81Z" fill="#6d5038" stroke="#302826" stroke-width="4"/><path d="M94 356h249v64H94Z" fill="url(#wood)"/>
+ <path d="m99 353-10 124h24l15-123m197-1 15 123h23l-15-123" fill="#4c382c" stroke="#2a2625" stroke-width="5"/>
+ <path d="M187 277h93v52h-93Z" fill="#534638" stroke="#25252a" stroke-width="3"/><path d="M183 274h101v9H183Z" fill="#78654e"/><path d="M232 279v47" stroke="#242a30" stroke-width="10"/><path d="M218 297h25v15h-25Z" fill="#a38459"/>
+ <path d="m95 321 30-20 70 17-33 11Z" fill="#879398" stroke="#3b424a" stroke-width="2"/><path d="m125 301 8 14 62 3" stroke="#bbc0b9" fill="none" stroke-width="2"/>
+ <g transform="translate(303 270)"><path d="M-10 12h22l10 40H-21Z" fill="#54566a"/><path d="M-9 0h19v13H-9Z" fill="#aa9064"/><path d="M-12 32h27" stroke="#ad99c5" stroke-width="3" opacity=".6"/></g>
+ <!-- 前景铁砧 -->
+ <ellipse cx="491" cy="475" rx="114" ry="24" fill="#171c23" opacity=".7"/>
+ <path d="m449 393 72-6 13 78-87 8Z" fill="url(#wood)" stroke="#312825" stroke-width="5"/><path d="M451 413h77m-79 42h84" stroke="#232831" stroke-width="8"/><path d="M459 400v72m43-77 6 68" stroke="#8a6240" stroke-width="2"/>
+ <path d="m378 325 159-12 31 16 48-2-27 24-39 8-10 53-90 9 4-38-29-7Z" fill="url(#steel)" stroke="#29313a" stroke-width="4"/>
+ <path d="m378 325 159-12 31 16 48-2-27 13-137 9Z" fill="#99948b"/><path d="m450 350 109-10-20 15-86 11Z" fill="#656e77"/>
+ <path d="m490 374 39-4-8 28-31 3Z" fill="#272f38"/><path d="m454 405 86-6v13l-90 9Z" fill="#616571"/>
+ <!-- 正在淬炼的刀胚、锤子 -->
+ <path d="m447 332 120-14 51 2-39 10-130 8Z" fill="#efb36a"/><path d="m447 334 155-13" stroke="#ffdf9a" stroke-width="2"/><path d="m550 371 65 51" stroke="#865b36" stroke-width="11"/><path d="m539 355 21-13 29 25-22 17Z" fill="#515f6b" stroke="#29343d" stroke-width="4"/>
+ <!-- 悬挂的灯、铁链和物件 -->
+ <path d="M847 0v112M847 109v48" stroke="#171e25" stroke-width="6"/><path d="m823 146 49 0 8 56h-65Z" fill="#242a31" stroke="#6c6252" stroke-width="4"/><path d="M825 156h40v34h-40Z" fill="#ce9051" opacity=".75"/><path d="M845 151v46" stroke="#393734" stroke-width="6"/><ellipse cx="845" cy="183" rx="55" ry="61" fill="url(#light)"/>
+ <path d="M282 0v75m233-75v134" stroke="#171c24" stroke-width="4"/><path d="m282 69 10 22-9 16-10-13 9-25" fill="none" stroke="#766859" stroke-width="4"/>
+ <path d="M871 211h81" stroke="#5a4534" stroke-width="7"/><path d="m887 210-9 79m30-80 6 54m21-52-3 59" stroke="#8a795d" stroke-width="4"/><path d="m872 283 16 4-6 29-17-2m40-54h23v18h-23m13-10 20 4-4 20-20-3" fill="#59636d" stroke="#2d353e" stroke-width="3"/>
+ <!-- 前景桶与矿石 -->
+ <path d="m722 423 66-3 10 89-71 2Z" fill="url(#wood)" stroke="#2b2828" stroke-width="4"/><ellipse cx="755" cy="423" rx="34" ry="11" fill="#272a2c" stroke="#71604e" stroke-width="5"/><path d="m724 447 66-1m-63 46h67" stroke="#4d5962" stroke-width="9"/>
+ <path d="m313 445 25-28 27 7 19 36-42 18-32-18Z" fill="#515f6a" stroke="#252c35" stroke-width="3"/><path d="m337 417 6 61m-30-33 30 7 22-28m-22 28 41 8" fill="none" stroke="#80949d" stroke-width="2"/>
+ <path d="m849 461 17-21 21 10-1 28-20 8Z" fill="#94714d" stroke="#40352d" stroke-width="3"/><path d="m880 482 15-26 24 9 11 30-27 15Z" fill="#727480" stroke="#343843" stroke-width="3"/>
+ <g fill="#ffc478"><circle cx="612" cy="222" r="2"/><circle cx="679" cy="184" r="2.5"/><circle cx="630" cy="153" r="1.5"/><circle cx="589" cy="269" r="2"/><circle cx="692" cy="246" r="1.5"/><circle cx="659" cy="119" r="1"/></g>
+ <rect width="1000" height="560" fill="#172029" opacity=".14"/>
+</svg>
