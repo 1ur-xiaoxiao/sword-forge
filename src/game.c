@@ -137,6 +137,23 @@ int game_salvage(Game *g, int index) {
     return OK;
 }
 
+int game_salvage_many(Game *g, const int *ids, int count) {
+    int selected[MAX_WEAPONS] = {0};
+    if (!ids || count < 1 || count > MAX_WEAPONS) return BAD_CHOICE;
+    for (int j = 0; j < count; ++j) {
+        int index = -1;
+        for (int i = 0; i < g->weapon_count; ++i)
+            if (g->weapons[i].id == ids[j]) { index = i; break; }
+        if (index < 0 || selected[index]) return BAD_CHOICE;
+        if (index == g->equipped) return LOCKED;
+        selected[index] = 1;
+    }
+    /* 从后向前删除，下标移动不会影响还没删除的武器。 */
+    for (int i = g->weapon_count - 1; i >= 0; --i)
+        if (selected[i]) (void)game_salvage(g, i);
+    return OK;
+}
+
 int game_claim_quests(Game *g) {
     int newly = 0, epic = 0;
     for (int i = 0; i < g->weapon_count; ++i)
@@ -159,6 +176,23 @@ int game_claim_quests(Game *g) {
 static int in_range(int n, int low, int high) { return n >= low && n <= high; }
 
 int game_validate(const Game *g) {
+    const Delve *d = &g->delve;
+    if (!in_range(d->clears,0,RESOURCE_LIMIT) || !in_range(d->active,0,1)) return 0;
+    if (d->active) {
+        const Battle *b = &d->battle;
+        if (!area_unlocked(g,d->area) || !in_range(d->seed,1,1000000000) || !in_range(d->floor,1,3) ||
+            !in_range(d->visited,1,63) || !(d->visited&1) || !in_range(d->room,0,5) ||
+            !in_range(d->reward,0,1) || !in_range(d->buffs,0,7) || g->event_kind>=0 ||
+            !in_range(b->active,0,1)) return 0;
+        if (d->reward && (!(d->visited&16) || d->buffs==7 || b->active)) return 0;
+        if (b->active && (b->area!=d->area || !b->delve || b->boss ||
+            (d->room!=3 && d->room!=4) || b->elite!=(d->room==4) ||
+            (d->visited & (1 << d->room)) || !in_range(b->hp,1,b->max_hp) ||
+            !in_range(b->max_hp,1,2000) || !in_range(b->attack,1,300) ||
+            !in_range(b->turn,0,RESOURCE_LIMIT) || !in_range(b->enemy,0,2) || !in_range(b->skill_cooldown,0,3))) return 0;
+    } else if (d->area || d->seed || d->floor || d->visited || d->room || d->reward || d->buffs ||
+               d->battle.area || d->battle.hp || d->battle.max_hp || d->battle.attack || d->battle.turn ||
+               d->battle.active || d->battle.boss || d->battle.enemy || d->battle.skill_cooldown || d->battle.delve || d->battle.elite) return 0;
     if (!g->rng || !in_range(g->level, 1, MAX_LEVEL) || !in_range(g->smith_level, 1, MAX_SMITH)) return 0;
     if (!in_range(g->xp, 0, level_xp_needed(g->level) - 1) ||
         !in_range(g->smith_xp, 0, smith_xp_needed(g->smith_level) - 1)) return 0;

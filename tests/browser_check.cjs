@@ -71,10 +71,14 @@ const check = name => { passed++; console.log(`PASS BROWSER ${passed}: ${name}`)
 
   await page.locator('.nav-item[data-page="inventory"]').click();
   await page.locator('#protect-toggle').check();
-  const upgraded=await clickAction('#upgrade-button');
+  await page.locator('#upgrade-button').click();
+  await page.locator('#upgrade-dialog').waitFor({state:'visible'});
+  const upgraded=await clickAction('#upgrade-start');
   assert.equal(upgraded.result,0);
   assert.equal(upgraded.items[2],equipped.items[2]-1);
   await page.waitForFunction(gold=>document.querySelector('#gold-count').textContent===gold,String(upgraded.gold));
+  await page.waitForFunction(()=>!busy);
+  await page.locator('#upgrade-dialog .dialog-close').first().click();
   await page.screenshot({path:path.join(output,'ui-inventory.png'),fullPage:true});
   await page.locator('.filter[data-filter="3"]').click();
   if(!upgraded.weapons.some(w=>w.rarity>=3)) assert(await page.locator('#weapon-grid .empty-state').isVisible());

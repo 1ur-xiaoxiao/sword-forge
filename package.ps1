@@ -11,7 +11,7 @@ try {
     New-Item -ItemType Directory -Path 'build','outputs' -Force | Out-Null
     & $resourceCompiler '-I' $PSScriptRoot '-i' 'src/assets.rc' '-o' 'build/assets.o'
     if ($LASTEXITCODE -ne 0) { throw 'Resource compilation failed.' }
-    $sources = @('src/data.c','src/game.c','src/forge.c','src/adventure.c','src/save.c','src/web_server.c')
+    $sources = @('src/data.c','src/game.c','src/forge.c','src/adventure.c','src/delve.c','src/save.c','src/game_api.c','src/web_server.c')
     $flags = @('-std=c11','-Wall','-Wextra','-Wpedantic','-Werror','-Wformat=2','-Iinclude','-finput-charset=UTF-8','-fexec-charset=UTF-8','-O2','-DFORGE_EMBEDDED_ASSETS','-static','-static-libgcc','-s')
     # Build to a separate filename so an already running game is never overwritten.
     & $compilerPath @flags @sources 'build/assets.o' '-o' 'outputs/SwordForge.exe' '-mwindows' '-lws2_32' '-lshell32'

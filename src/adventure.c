@@ -8,7 +8,7 @@ int area_unlocked(const Game *g, int area) {
 
 static int begin(Game *g, int area, int boss, Battle *battle) {
     if (area < 0 || area >= AREA_COUNT) return BAD_CHOICE;
-    if (!area_unlocked(g, area) || g->event_kind >= 0) return LOCKED;
+    if (!area_unlocked(g, area) || g->event_kind >= 0 || g->delve.active) return LOCKED;
     if (boss && g->area_wins[area] < 2) return LOCKED;
     int cost = areas[area].energy + (boss ? 5 : 0);
     if (g->energy < cost) return NO_RESOURCE;
@@ -74,6 +74,7 @@ static void battle_reward(Game *g, Battle *battle, BattleReport *report) {
     if (g->streak < 5) ++g->streak;
     int bonus = (g->streak - 1) * 10;
     int coins = areas[area].gold + random_below(g, 21);
+    if (battle->delve && (g->delve.buffs & 4)) coins += coins / 4;
     game_add_resource(&g->gold, coins + coins * bonus / 100);
     game_add_resource(&g->materials[IRON], 3 + area * 2 + random_below(g, 4));
     game_add_resource(&g->materials[WOOD], 2 + area / 2 + random_below(g, 3));
@@ -87,7 +88,15 @@ static void battle_reward(Game *g, Battle *battle, BattleReport *report) {
     if (random_below(g, 100) < 8) game_add_resource(&g->items[STAMINA], 1);
     game_add_resource(&g->wins, 1);
     game_add_xp(g, areas[area].xp + areas[area].xp * bonus / 100, 0);
-    if (!battle->boss) game_add_resource(&g->area_wins[area], 1);
+    if (battle->delve) {
+        g->delve.visited |= 1 << g->delve.room;
+        if (battle->elite) {
+            g->delve.reward = g->delve.buffs == 7 ? 0 : 1;
+            game_add_resource(&g->materials[areas[area].material], 3 + g->delve.floor);
+        }
+        if (g->delve.buffs & 2) { g->hp += 25; if(g->hp>game_max_hp(g))g->hp=game_max_hp(g); }
+    }
+    else if (!battle->boss) game_add_resource(&g->area_wins[area], 1);
     else if (!(g->boss_flags & (1 << area))) {
         g->boss_flags |= 1 << area;
         report->first_clear = 1;
@@ -103,7 +112,7 @@ static void battle_reward(Game *g, Battle *battle, BattleReport *report) {
     }
 }
 
-int battle_step(Game *g, Battle *battle, int action, BattleReport *report) {
+static int step(Game *g, Battle *battle, int action, BattleReport *report) {
     int status;
     memset(report, 0, sizeof(*report));
     if (!battle->active || battle->area < 0 || battle->area >= AREA_COUNT || action < ATTACK || action > SKILL)
@@ -121,10 +130,12 @@ int battle_step(Game *g, Battle *battle, int action, BattleReport *report) {
     if (action == ESCAPE && random_below(g, 100) < 75) {
         g->streak = 0;
         battle->active = 0; report->outcome = 3;
+        if (battle->delve) (void)delve_leave(g);
         return OK;
     }
     if (action == ATTACK || action == DEFEND || action == SKILL) {
         report->player_damage = game_attack(g) + random_below(g, 7);
+        if (battle->delve && (g->delve.buffs & 1)) report->player_damage += report->player_damage / 4;
         if (action == DEFEND) report->player_damage = (report->player_damage + 1) / 2;
         else if (action == SKILL) report->player_damage *= 2;
         else if (random_below(g, 100) < 12) report->player_damage *= 2;
@@ -136,7 +147,7 @@ int battle_step(Game *g, Battle *battle, int action, BattleReport *report) {
         return OK;
     }
     report->enemy_damage = battle->attack + random_below(g, 5);
-    report->heavy = battle->boss && battle->turn % 3 == 0;
+    report->heavy = (battle->boss || battle->elite) && battle->turn % 3 == 0;
     if (report->heavy) report->enemy_damage = report->enemy_damage * 2;
     if (action == DEFEND) report->enemy_damage = (report->enemy_damage + 2) / 3;
     g->hp -= report->enemy_damage;
@@ -145,6 +156,13 @@ int battle_step(Game *g, Battle *battle, int action, BattleReport *report) {
         battle->active = 0; report->outcome = 2;
         g->hp = game_max_hp(g) / 2;
         g->gold -= g->gold / 10;
+        if (battle->delve) (void)delve_leave(g);
     }
     return OK;
+}
+
+int battle_step(Game *g, Battle *battle, int action, BattleReport *report) {
+    int result = step(g, battle, action, report);
+    if (result == OK && battle->delve && g->delve.active) g->delve.battle = *battle;
+    return result;
 }

@@ -26,6 +26,17 @@ typedef struct {
 } Weapon;
 
 typedef struct {
+    int area, hp, max_hp, attack, turn, active;
+    int boss, enemy, skill_cooldown;
+    int delve, elite; /* 秘境精英不会误领六域首领的永久战功。 */
+} Battle;
+
+typedef struct {
+    int active, area, seed, floor, visited, room, reward, buffs, clears;
+    Battle battle; /* 秘境战斗完整保存，退出后可以继续本回合。 */
+} Delve;
+
+typedef struct {
     uint32_t rng; /* 保存随机数状态，读档后继续同一随机序列。 */
     int level, xp, smith_level, smith_xp;
     int hp, energy, gold, day;
@@ -36,6 +47,7 @@ typedef struct {
     int streak; /* 同一次营地出发的连胜，最多 5；休息/战败/逃跑重置。 */
     int area_wins[AREA_COUNT], surveys[AREA_COUNT], boss_flags;
     int event_area, event_kind; /* -1 表示无待处理事件；事件选择也随存档保存。 */
+    Delve delve;
 } Game;
 
 typedef struct {
@@ -50,11 +62,6 @@ typedef struct {
     const char *boss, *enemies[3];
     int boss_hp, boss_attack, material;
 } Area;
-
-typedef struct {
-    int area, hp, max_hp, attack, turn, active;
-    int boss, enemy, skill_cooldown;
-} Battle;
 
 typedef struct {
     int player_damage, enemy_damage, healed;
@@ -84,6 +91,8 @@ int game_use_stamina(Game *g);
 int game_buy(Game *g, int item, int count);
 int game_equip(Game *g, int index);
 int game_salvage(Game *g, int index);
+/* 按永久武器编号批量回收：先检查整个选择，避免只回收一部分。 */
+int game_salvage_many(Game *g, const int *ids, int count);
 int game_claim_quests(Game *g);
 int game_validate(const Game *g);
 
@@ -100,6 +109,10 @@ int boss_begin(Game *g, int area, Battle *battle);
 int game_gather(Game *g, int area);
 int game_resolve_event(Game *g, int choice);
 int battle_step(Game *g, Battle *battle, int action, BattleReport *report);
+int delve_begin(Game *g, int area);
+int delve_room(Game *g, int room, int choice, Battle *battle);
+int delve_blessing(Game *g, int choice);
+int delve_leave(Game *g);
 
 int save_game(const Game *g, const char *path);
 int load_game(Game *g, const char *path);

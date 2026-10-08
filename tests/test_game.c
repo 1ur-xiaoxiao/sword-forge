@@ -311,9 +311,9 @@ static void test_legacy_migration(void) {
     assert(g.gold == 180 && g.items[POTION] == 3 && g.items[STAMINA] == 0 && g.streak == 0);
     assert(save_game(&g, path));
     char version[32]; f = fopen(path, "r"); assert(f);
-    assert(fscanf(f, "%31s", version) == 1 && !strcmp(version, "FORGE_SAVE_V3"));
+    assert(fscanf(f, "%31s", version) == 1 && !strcmp(version, "FORGE_SAVE_V4"));
     fclose(f); remove(path);
-    passed("V1 player saves migrate safely to V3 with map/event defaults");
+    passed("V1 player saves migrate safely to V4 with map/event defaults");
 }
 
 static void test_world_events(void) {
@@ -387,10 +387,69 @@ static void test_v2_migration(void) {
     passed("V2 progression and inventory preserved while new map fields initialize safely");
 }
 
+static void test_batch_salvage(void) {
+    Game g, before;
+    game_init(&g, 47);
+    g.weapon_count = 4; g.next_id = 5; g.equipped = 2;
+    for (int i=0;i<4;++i) g.weapons[i]=(Weapon){i+1,0,i,10+i*9,i};
+    before=g;
+    int invalid[]={1,99}, duplicate[]={1,1}, equipped[]={1,3};
+    assert(game_salvage_many(&g,invalid,2)==BAD_CHOICE && !memcmp(&g,&before,sizeof(g)));
+    assert(game_salvage_many(&g,duplicate,2)==BAD_CHOICE && !memcmp(&g,&before,sizeof(g)));
+    assert(game_salvage_many(&g,equipped,2)==LOCKED && !memcmp(&g,&before,sizeof(g)));
+    int selected[]={4,1,2};
+    assert(game_salvage_many(&g,selected,3)==OK);
+    assert(g.weapon_count==1 && g.equipped==0 && g.weapons[0].id==3);
+    assert(g.gold==before.gold+10+26+58 && g.materials[IRON]==before.materials[IRON]+2+3+5);
+    assert(game_validate(&g));
+    passed("batch recycling uses stable ids, rejects entire invalid selection and protects equipped blade");
+}
+
 int main(void) {
     test_initial_rng(); test_forge_guards(); test_probabilities_pity(); test_long_forging();
     test_equipment_salvage(); test_upgrades(); test_growth_shop_rest(); test_battles();
     test_quests(); test_save_roundtrip(); test_bad_saves(); test_campaign(); test_stamina_streak(); test_legacy_migration(); test_world_events(); test_boss_skill(); test_v2_migration();
+    test_batch_salvage();
+    /* 秘境测试也走真实数值，只把角色设为后期装备以覆盖三层流程。 */
+    Game g, copy, old; Battle b; BattleReport r;
+    game_init(&g, 88); old=g;
+    assert(delve_begin(&g,5)==LOCKED && !memcmp(&g,&old,sizeof(g)));
+    g.energy=19;old=g;assert(delve_begin(&g,0)==NO_RESOURCE && !memcmp(&g,&old,sizeof(g)));
+    g.energy=100;assert(delve_begin(&g,0)==OK && g.energy==80);
+    old=g;assert(delve_room(&g,5,0,&b)==LOCKED && !memcmp(&g,&old,sizeof(g)));
+    assert(delve_room(&g,1,0,&b)==OK);old=g;
+    assert(delve_room(&g,1,1,&b)==LOCKED && !memcmp(&g,&old,sizeof(g)));
+    assert(delve_room(&g,2,1,&b)==OK && g.energy==95);
+    passed("delve route/cost checks, single-claim chests/springs and locked staircase are atomic");
+    assert(delve_room(&g,3,0,&b)==OK);
+    assert(battle_step(&g,&b,SKILL,&r)==OK && b.active);
+    assert(save_game(&g,"build/test_delve.sav") && load_game(&copy,"build/test_delve.sav"));
+    assert(!memcmp(&g,&copy,sizeof(g)) && copy.delve.battle.hp==b.hp && copy.delve.battle.skill_cooldown==3);
+    old=g;copy.delve.battle.hp=copy.delve.battle.max_hp+1;
+    assert(!game_validate(&copy));copy=g;copy.delve.visited|=8;assert(!game_validate(&copy));
+    remove("build/test_delve.sav");
+    passed("V4 saves dungeon seed, floors and complete ongoing battle and rejects impossible state");
+    assert(delve_leave(&g)==OK);g.level=20;g.hp=game_max_hp(&g);g.weapons[0]=(Weapon){1,5,LEGENDARY,106,10};
+    assert(delve_begin(&g,0)==OK);
+    for(int floor=1;floor<=3;++floor){
+        assert(g.delve.floor==floor);
+        for(int room=3;room<=4;++room){assert(delve_room(&g,room,0,&b)==OK);
+            while(b.active)assert(battle_step(&g,&b,b.skill_cooldown?ATTACK:SKILL,&r)==OK);
+            assert(game_validate(&g));assert(g.delve.visited&(1<<room));
+        }
+        assert(g.delve.reward);old=g;assert(delve_room(&g,5,0,&b)==LOCKED && !memcmp(&g,&old,sizeof(g)));
+        assert(delve_blessing(&g,floor-1)==OK && !g.delve.reward);
+        assert(delve_room(&g,5,0,&b)==OK && game_validate(&g));
+    }
+    assert(!g.delve.active && g.delve.clears==1 && g.boss_flags==0 && g.area_wins[0]==0 && g.wins==6);
+    passed("three-floor delve combines all blessings and pays completion rewards without granting region boss trophies");
+    game_init(&g,56);assert(delve_begin(&g,0)==OK);assert(delve_room(&g,4,0,&b)==OK);g.hp=1;
+    assert(battle_step(&g,&b,DEFEND,&r)==OK && r.outcome==2 && !g.delve.active && game_validate(&g));
+    passed("delve defeat returns to camp, clears temporary buffs and retains validated permanent inventory");
+    FILE *v3=fopen("build/test_v3.sav","w");assert(v3);
+    fputs("FORGE_SAVE_V3\n123\n3 0 2 0\n124 70 300 4\n1 0 2\n5 8 4 1\n3\n0 -1 -1\n0 0\n0 0\n0 0\n0 0\n0 0\n0 0\n12 6 2 1\n3 1 1 2\n1 0 0 10 0\nEND\n",v3);fclose(v3);
+    assert(load_game(&g,"build/test_v3.sav") && g.level==3 && g.gold==300 && !g.delve.active && g.delve.clears==0);
+    remove("build/test_v3.sav");passed("V3 saves keep levels, resources and old map progression when upgrading to V4");
     printf("\n%d test groups passed.\n", groups);
     return 0;
 }

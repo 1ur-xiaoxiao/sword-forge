@@ -3,10 +3,14 @@
 102 RCDATA "web/styles.css"
 103 RCDATA "web/app.js"
 104 RCDATA "web/assets/forge.svg"
+105 RCDATA "web/scene.js"
+106 RCDATA "web/vendor/rot.js"
+107 RCDATA "web/dungeon.js"
+108 RCDATA "web/vendor/ROT-LICENSE.txt"
 
 1 VERSIONINFO
-FILEVERSION 2,0,0,0
-PRODUCTVERSION 2,0,0,0
+FILEVERSION 3,1,0,0
+PRODUCTVERSION 3,1,0,0
 FILEOS 0x40004
 FILETYPE 0x1
 BEGIN
@@ -16,8 +20,8 @@ BEGIN
   BEGIN
    VALUE "FileDescription", "Sword Forge - The Six Realms\0"
    VALUE "ProductName", "Sword Forge\0"
-   VALUE "FileVersion", "2.0.0\0"
-   VALUE "ProductVersion", "2.0.0\0"
+   VALUE "FileVersion", "3.1.0\0"
+   VALUE "ProductVersion", "3.1.0\0"
   END
  END
  BLOCK "VarFileInfo"

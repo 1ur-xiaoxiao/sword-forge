@@ -19,13 +19,17 @@ int save_game(const Game *g, const char *path) {
     if (written < 0 || written >= (int)sizeof(temporary)) return 0;
     f = fopen(temporary, "w");
     if (!f) return 0;
-    good = fprintf(f, "FORGE_SAVE_V3\n%lu\n%d %d %d %d\n%d %d %d %d\n%d %d %d\n%d %d %d %d\n%d\n",
+    good = fprintf(f, "FORGE_SAVE_V4\n%lu\n%d %d %d %d\n%d %d %d %d\n%d %d %d\n%d %d %d %d\n%d\n",
                    (unsigned long)g->rng, g->level, g->xp, g->smith_level, g->smith_xp,
                    g->hp, g->energy, g->gold, g->day, g->weapon_count, g->equipped, g->next_id,
                    g->forged, g->wins, g->pity, g->quest_flags, g->streak) >= 0;
     if (fprintf(f, "%d %d %d\n", g->boss_flags, g->event_area, g->event_kind) < 0) good = 0;
     for (int i = 0; i < AREA_COUNT; ++i)
         if (fprintf(f, "%d %d\n", g->area_wins[i], g->surveys[i]) < 0) good = 0;
+    const Delve *d=&g->delve; const Battle *b=&d->battle;
+    if (fprintf(f,"%d %d %d %d %d %d %d %d %d\n%d %d %d %d %d %d %d %d %d %d %d\n",
+        d->active,d->area,d->seed,d->floor,d->visited,d->room,d->reward,d->buffs,d->clears,
+        b->area,b->hp,b->max_hp,b->attack,b->turn,b->active,b->boss,b->enemy,b->skill_cooldown,b->delve,b->elite)<0)good=0;
     for (int i = 0; i < MATERIAL_COUNT; ++i)
         if (fprintf(f, "%d%c", g->materials[i], i + 1 == MATERIAL_COUNT ? '\n' : ' ') < 0) good = 0;
     for (int i = 0; i < ITEM_COUNT; ++i)
@@ -68,7 +72,7 @@ static int read_body(FILE *f, Game *candidate) {
     char token[64];
     long long state;
     if (fscanf(f, "%63s", token) != 1) return 0;
-    int version = !strcmp(token, "FORGE_SAVE_V1") ? 1 : (!strcmp(token, "FORGE_SAVE_V2") ? 2 : (!strcmp(token, "FORGE_SAVE_V3") ? 3 : 0));
+    int version = !strcmp(token, "FORGE_SAVE_V1") ? 1 : (!strcmp(token, "FORGE_SAVE_V2") ? 2 : (!strcmp(token, "FORGE_SAVE_V3") ? 3 : (!strcmp(token,"FORGE_SAVE_V4")?4:0)));
     if (!version) return 0;
     if (!read_number(f, 1, UINT32_MAX, &state)) return 0;
     candidate->rng = (uint32_t)state;
@@ -82,6 +86,13 @@ static int read_body(FILE *f, Game *candidate) {
     if (version >= 3) {
         READ_FIELD(boss_flags); READ_FIELD(event_area); READ_FIELD(event_kind);
         for (int i = 0; i < AREA_COUNT; ++i) { READ_FIELD(area_wins[i]); READ_FIELD(surveys[i]); }
+    }
+    if (version >= 4) {
+        READ_FIELD(delve.active);READ_FIELD(delve.area);READ_FIELD(delve.seed);READ_FIELD(delve.floor);
+        READ_FIELD(delve.visited);READ_FIELD(delve.room);READ_FIELD(delve.reward);READ_FIELD(delve.buffs);READ_FIELD(delve.clears);
+        READ_FIELD(delve.battle.area);READ_FIELD(delve.battle.hp);READ_FIELD(delve.battle.max_hp);READ_FIELD(delve.battle.attack);
+        READ_FIELD(delve.battle.turn);READ_FIELD(delve.battle.active);READ_FIELD(delve.battle.boss);READ_FIELD(delve.battle.enemy);
+        READ_FIELD(delve.battle.skill_cooldown);READ_FIELD(delve.battle.delve);READ_FIELD(delve.battle.elite);
     }
     if (candidate->weapon_count < 1 || candidate->weapon_count > MAX_WEAPONS) return 0;
     for (int i = 0; i < MATERIAL_COUNT; ++i) READ_FIELD(materials[i]);

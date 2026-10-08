@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-08",
+  "groups": 14,
+  "android": "16",
+  "api": "36",
+  "abi": "x86_64",
+  "viewport": {
+    "width": 412,
+    "height": 684
+  },
+  "errors": [],
+  "final": {
+    "gold": 351,
+    "wins": 3,
+    "weapons": 2,
+    "items": [
+      4,
+      1,
+      1,
+      2
+    ]
+  },
+  "releaseInstalled": true,
+  "releaseDebuggable": false,
+  "networkPermission": false,
+  "releaseGold": 351
+}

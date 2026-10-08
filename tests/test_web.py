@@ -72,7 +72,8 @@ with tempfile.TemporaryDirectory(dir=ROOT / "work", prefix="web_test_") as direc
         check("C backend exposes initial state and exact probability tables")
 
         for path, expected_type in [("/", "text/html"), ("/styles.css", "text/css"),
-                                    ("/app.js", "text/javascript"), ("/assets/forge.svg", "image/svg+xml")]:
+                                    ("/app.js", "text/javascript"), ("/scene.js", "text/javascript"), ("/dungeon.js", "text/javascript"),
+                                    ("/vendor/rot.js", "text/javascript"), ("/vendor/ROT-LICENSE.txt", "text/plain"), ("/assets/forge.svg", "image/svg+xml")]:
             data, headers = request(path)
             assert len(data) > 100 and expected_type in headers["Content-Type"]
             data.decode("utf-8")
@@ -135,6 +136,35 @@ with tempfile.TemporaryDirectory(dir=ROOT / "work", prefix="web_test_") as direc
         assert action("event", 1)["result"] == 1
         check("new route gates, gathering, persisted event selection and single-claim reward")
 
+        primary = state()
+        assert primary["activeSlot"] == 0 and len(primary["slots"]) == 4
+        fresh = action("slot", 1)
+        assert fresh["activeSlot"] == 1 and fresh["gold"] == 180 and len(fresh["weapons"]) == 1
+        fresh = action("forge", 0)
+        assert fresh["result"] == 0 and len(fresh["weapons"]) == 2
+        action("quit"); process.wait(timeout=4); process=start()
+        assert state()["activeSlot"] == 1 and state()["gold"] == fresh["gold"]
+        restored = action("slot", 0)
+        assert restored["gold"] == primary["gold"] and restored["weapons"] == primary["weapons"]
+        (project/"saves/game.slot3.sav").write_bytes(b"BAD SLOT")
+        refused = action("slot", 2)
+        assert refused["result"] == 6 and refused["activeSlot"] == 0
+        assert (project/"saves/game.slot3.sav").read_bytes() == b"BAD SLOT"
+        check("four independent slots preserve original save, last selection survives cold restart and damaged slot cannot overwrite active progress")
+        old = state()
+        for ids in ("1-999", "1-1", "1-2", "1-", "-1", "1%2D2"):
+            refused = json.loads(request("/api/action", {"action":"salvage_many", "ids":ids})[0])
+            assert refused["result"] != 0 and refused["weapons"] == old["weapons"] and refused["gold"] == old["gold"]
+        bulk = json.loads(request("/api/action", {"action":"salvage_many", "ids":"1"})[0])
+        assert bulk["result"] == 0 and len(bulk["weapons"]) == 1 and bulk["weapons"][0]["id"] == 2
+        # Restore the primary fixture used by the existing restart assertions.
+        action("quit");process.wait(timeout=4)
+        (project/"saves/game.sav").write_bytes((project/"saves/game.slot2.sav").read_bytes())
+        process=start();action("equip",1)
+        # This fresh slot has no wins; replay one patrol to match the restart fixture.
+        action("explore",0)
+        while state()["battle"]["active"]: action("battle",4 if state()["battle"]["cooldown"]==0 else 0)
+        check("batch API rejects malformed, duplicate and equipped ids without partial rewards")
         previous = (project / "saves/game.sav").read_bytes()
         action("quit")
         process.wait(timeout=4)

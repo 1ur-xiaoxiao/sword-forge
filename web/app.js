@@ -17,8 +17,39 @@ const pages = {
 let state = null, recipeIndex = 0, weaponId = null, filter = -1, sort = 'new';
 let areaIndex = 0, lastAdventure = '';
 let busy = false, closed = false, protectedUpgrade = false, currentPage = 'forge';
-let toastTimer, confirmResolve, soundEnabled = false, audioContext;
+let toastTimer, confirmResolve, soundEnabled = localStorage.getItem('swordforge-muted') !== '1', audioContext;
 const history = [];
+let batchMode=false; const batchIds=new Set(); let upgradeId=null;
+Forge2D.attach($('#town-canvas'),'town');
+Delve2D.attach($('#delve-canvas'));
+Forge2D.attach($('#upgrade-canvas'),'upgrade');
+$('#page-explore').prepend($('#battle-panel'));
+function syncSound(){const b=$('#sound-button');b.setAttribute('aria-pressed',String(soundEnabled));b.title=soundEnabled?'关闭音效':'开启音效';b.setAttribute('aria-label',b.title);}
+syncSound();
+document.addEventListener('pointerdown',()=>{if(soundEnabled)playSound('touch');},{once:true});
+const isAndroid = typeof window.SwordForgeAndroid !== 'undefined';
+if(isAndroid) document.documentElement.classList.add('android-app');
+async function gameRequest(path, options={}) {
+  if(isAndroid) {
+    const json = options.method === 'POST' ? SwordForgeAndroid.action(options.body.toString()) : SwordForgeAndroid.state();
+    return {ok:true, json:async()=>JSON.parse(json)};
+  }
+  return fetch(path, options);
+}
+function requestTimeout(ms) {
+  return typeof AbortSignal!=='undefined' && typeof AbortSignal.timeout==='function' ? AbortSignal.timeout(ms) : undefined;
+}
+// 安卓返回键：先关闭弹窗，再回到工坊，最后由原生应用确认退出。
+window.androidBack = function() {
+  const opened = document.querySelector('dialog[open]');
+  if(opened) {
+    if(opened.id==='confirm-dialog')finishConfirm(false); else opened.close();
+    return true;
+  }
+  if(currentPage!=='forge') {switchPage('forge'); return true;}
+  return false;
+};
+
 const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const amount = (n) => Number(n).toLocaleString('zh-CN');
 const pct = (n, total) => `${Math.min(100, Math.max(0, 100 * n / total))}%`;
@@ -67,7 +98,7 @@ function playSound(kind = 'click') {
   try {
     audioContext ??= new (window.AudioContext || window.webkitAudioContext)();
     audioContext.resume();
-    const notes = kind === 'forge' ? [380, 570, 760] : kind === 'win' ? [440, 554, 659] : [260];
+    const notes = kind === 'touch' ? [] : kind === 'legend' ? [330,440,554,659,880,1109] : kind === 'epic' ? [330,494,659,988] : kind === 'forge' ? [160,220,180,570] : kind === 'win' ? [440,554,659] : kind === 'fail' ? [180,130] : [260];
     notes.forEach((frequency, i) => {
       const oscillator = audioContext.createOscillator(), gain = audioContext.createGain();
       const t = audioContext.currentTime + i * .1;
@@ -77,7 +108,7 @@ function playSound(kind = 'click') {
       oscillator.connect(gain); gain.connect(audioContext.destination);
       oscillator.start(t); oscillator.stop(t + .3);
     });
-  } catch { soundEnabled = false; }
+  } catch { soundEnabled = localStorage.getItem('swordforge-muted') !== '1'; }
 }
 
 function switchPage(page) {
@@ -88,10 +119,12 @@ function switchPage(page) {
   const meta = pages[page];
   $('#page-eyebrow').textContent = meta[0]; $('#page-title').textContent = meta[1];
   $('#page-subtitle').textContent = meta[2]; $('#location-page').textContent = meta[3];
+  if(state)Delve2D.update(state);
   playSound();
 }
 
 function renderCommon() {
+  renderSlots();
   $('#gold-count').textContent = amount(state.gold);
   $('#day-count').textContent = state.day;
   $('#player-level').textContent = `Lv.${state.level}`; $('#level-badge').textContent = state.level;
@@ -101,9 +134,9 @@ function renderCommon() {
   $('#bag-count').textContent = state.weapons.length;
   const w = state.weapons[state.equipped];
   $('#equipped-mini').innerHTML = `<span class="mini-icon">${icon('sword')}</span><div><p>当前装备 · 攻击 ${state.attack}</p><b>${w ? `${state.recipes[w.recipe].name} +${w.upgrade}` : '尚未装备'}</b></div>`;
-  $('#rest-button').disabled = busy || state.battle.active || state.event.kind >= 0 || state.corrupted;
+  $('#rest-button').disabled = busy || state.battle.active || state.delve.active || state.event.kind >= 0 || state.corrupted;
   $('#rest-button small').textContent = state.streak ? '回满状态 · 重置连续探索' : '恢复全部生命与体力';
-  $('#save-button').disabled = busy || state.battle.active || state.event.kind >= 0 || state.corrupted;
+  $('#save-button').disabled = busy || state.battle.active || state.delve.active || state.event.kind >= 0 || state.corrupted;
   $('#save-state').innerHTML = `<i style="background:${state.saveOk && !state.corrupted ? '#83bca3' : '#d89179'}"></i>${state.corrupted ? '原存档无法读取' : state.saveOk ? '进度已自动保存' : '保存失败，请检查权限'}`;
 }
 
@@ -122,6 +155,7 @@ function renderForge() {
   $('#pity-marks').innerHTML = Array.from({length:20}, (_, i) => `<i class="${i < state.pity ? 'filled' : ''}"></i>`).join('');
   let reason = '';
   if (state.corrupted) reason = '原存档无法读取，请在旅程设置里处理';
+  else if (state.delve.active) reason = '正在秘境探险，先撤离返回工坊';
   else if (state.event.kind >= 0) reason = '先在荒野探索中完成当前事件';
   else if (state.battle.active) reason = '当前正在战斗，请先回到营地';
   else if (state.level < r.level) reason = `角色达到 Lv.${r.level} 后解锁此配方`;
@@ -165,7 +199,8 @@ function mapLandscape() {
 
 function renderExplore() {
   const b = state.battle, pending = state.event.kind >= 0;
-  const blocked = busy || b.active || pending || state.corrupted;
+  const blocked = busy || b.active || state.delve.active || pending || state.corrupted;
+  $('#page-explore').classList.toggle('in-delve',state.delve.active);
   $('#vitals').innerHTML = `<div class="vital health"><p>生命</p><b>${state.hp}</b><small>/ ${state.maxHp}</small><div class="progress"><i style="width:${pct(state.hp,state.maxHp)}"></i></div></div><div class="vital energy"><p>体力</p><b>${state.energy}</b><small>/ 100</small><div class="progress"><i style="width:${state.energy}%"></i></div></div><div class="vital"><p>总攻击力</p><b>${state.attack}</b><small>战功加成 +${state.trophies*2}</small></div>`;
   $('#world-progress').textContent = `${state.trophies} / ${state.areas.length} 首领已击败`;
   $('#world-map').innerHTML = mapLandscape()+state.areas.map((a,i)=>`<button class="map-node ${a.unlocked?'available':'locked'} ${a.cleared?'cleared':''} ${i===areaIndex?'selected':''}" data-area="${i}" style="left:${regionPoints[i][0]}%;top:${regionPoints[i][1]}%;--region:${regionColors[i]}" aria-pressed="${i===areaIndex}" aria-label="${a.name}，${a.cleared?'首领已击败':a.unlocked?'已解锁':'未解锁'}"><span class="node-mark">${icon(a.cleared?'check':a.unlocked?regionSymbols[i]:'lock')}</span><b>${a.name}</b><small>Lv.${a.level} · ${a.cleared?'已通关':a.unlocked?'可探索':'未解锁'}</small></button>`).join('');
@@ -173,16 +208,18 @@ function renderExplore() {
   const lockReason = state.level<a.level ? `角色达到 Lv.${a.level}` : i>0&&!state.areas[i-1].cleared ? `先击败${state.areas[i-1].boss}` : '';
   const bossReady = a.wins >= 2;
   const minimumAttack = Math.ceil(a.bossHp/6);
-  $('#area-list').innerHTML = `<article class="area-card region-detail" style="--region:${regionColors[i]}"><div class="area-art"><span class="area-tag">CHAPTER ${String(i+1).padStart(2,'0')}</span>${icon(regionSymbols[i])}<span class="region-biome">${['林地 · 矿脉','遗迹 · 祭坛','裂隙 · 坠星','火山 · 熔炉','雪原 · 极光','王城 · 云海'][i]}</span></div><div class="area-body"><div class="region-title"><h3>${a.name}</h3><span>${a.cleared?'已解放':a.unlocked?'路线已开启':'路线未开启'}</span></div><p>${regionLore[i]}</p><div class="region-facts"><span>常见敌人<br><b>${a.enemies.join(' / ')}</b></span><span>特色材料<br><b>${materialNames[a.material]}</b></span><span>战斗收益<br><b>${a.gold}~${a.gold+20} 金币 · ${a.xp} 经验</b></span></div>${!a.unlocked?`<p class="route-lock">${icon('lock')}${state.level<a.level?`需要 Lv.${a.level}`:''}${i>0&&!state.areas[i-1].cleared?` · 击败${state.areas[i-1].boss}`:''}</p>`:''}<div class="region-actions"><button class="primary-button" data-explore="${i}" ${blocked||!a.unlocked||state.energy<a.energy?'disabled':''}>${icon('sword')}${!a.unlocked?lockReason:`巡逻战斗 · ${a.energy} 体力`}</button><button class="secondary-button" data-gather="${i}" ${blocked||!a.unlocked||state.energy<10?'disabled':''}>${icon('iron')}采集与事件 · 10 体力</button></div><div class="boss-contract"><div><span class="eyebrow">REGION BOSS</span><h4>${a.boss}</h4><p>生命 ${a.bossHp}~${a.bossHp+15} · 攻击 ${a.bossAttack}~${a.bossAttack+7}<br>${a.cleared?'首通奖励已领取 · 重战获得额外金币与特色材料':`首通：${120+i*90} 金币、幸运符、保护符${i>=1?`、${i+1} 星陨石`:''}<br>永久 +2 攻击、+8 生命 · 回满生命 · 打开后续路线`}</p><small>已完成 ${a.wins} 次巡逻 · ${a.surveys} 次采集 · ${state.attack<minimumAttack?`建议攻击 ${minimumAttack}+，先强化武器`:'装备已具备挑战基础，带好治疗药水'}</small></div><button class="boss-button" data-boss="${i}" ${blocked||!a.unlocked||!bossReady||state.energy<a.energy+5?'disabled':''}>${icon('shield')}${!bossReady?`巡逻 ${Math.min(a.wins,2)}/2 后挑战`:`${a.cleared?'再次挑战':'挑战首领'} · ${a.energy+5} 体力`}</button></div></div></article>`;
+  $('#area-list').innerHTML = `<article class="area-card region-detail" style="--region:${regionColors[i]}"><div class="area-art"><span class="area-tag">CHAPTER ${String(i+1).padStart(2,'0')}</span>${icon(regionSymbols[i])}<span class="region-biome">${['林地 · 矿脉','遗迹 · 祭坛','裂隙 · 坠星','火山 · 熔炉','雪原 · 极光','王城 · 云海'][i]}</span></div><div class="area-body"><div class="region-title"><h3>${a.name}</h3><span>${a.cleared?'已解放':a.unlocked?'路线已开启':'路线未开启'}</span></div><p>${regionLore[i]}</p><div class="region-facts"><span>常见敌人<br><b>${a.enemies.join(' / ')}</b></span><span>特色材料<br><b>${materialNames[a.material]}</b></span><span>战斗收益<br><b>${a.gold}~${a.gold+20} 金币 · ${a.xp} 经验</b></span></div>${!a.unlocked?`<p class="route-lock">${icon('lock')}${state.level<a.level?`需要 Lv.${a.level}`:''}${i>0&&!state.areas[i-1].cleared?` · 击败${state.areas[i-1].boss}`:''}</p>`:''}<div class="region-actions"><button class="primary-button" data-explore="${i}" ${blocked||!a.unlocked||state.energy<a.energy?'disabled':''}>${icon('sword')}${!a.unlocked?lockReason:`巡逻战斗 · ${a.energy} 体力`}</button><button class="secondary-button" data-gather="${i}" ${blocked||!a.unlocked||state.energy<10?'disabled':''}>${icon('iron')}采集与事件 · 10 体力</button></div><button class="secondary-button delve-enter" data-delve="${i}" ${blocked||!a.unlocked||state.energy<20?'disabled':''}>${icon('map')}进入三层随机秘境 · 20 体力</button><div class="boss-contract"><div><span class="eyebrow">REGION BOSS</span><h4>${a.boss}</h4><p>生命 ${a.bossHp}~${a.bossHp+15} · 攻击 ${a.bossAttack}~${a.bossAttack+7}<br>${a.cleared?'首通奖励已领取 · 重战获得额外金币与特色材料':`首通：${120+i*90} 金币、幸运符、保护符${i>=1?`、${i+1} 星陨石`:''}<br>永久 +2 攻击、+8 生命 · 回满生命 · 打开后续路线`}</p><small>已完成 ${a.wins} 次巡逻 · ${a.surveys} 次采集 · ${state.attack<minimumAttack?`建议攻击 ${minimumAttack}+，先强化武器`:'装备已具备挑战基础，带好治疗药水'}</small></div><button class="boss-button" data-boss="${i}" ${blocked||!a.unlocked||!bossReady||state.energy<a.energy+5?'disabled':''}>${icon('shield')}${!bossReady?`巡逻 ${Math.min(a.wins,2)}/2 后挑战`:`${a.cleared?'再次挑战':'挑战首领'} · ${a.energy+5} 体力`}</button></div></div></article>`;
   $('#stamina-controls').innerHTML = `<div class="combo-note">${icon('flame')}<div><b>连续探索 ${state.streak} 胜 <span>下一场收益 +${state.nextBonus}%</span></b><p>金币与经验最多 +40% · 采集与事件保留连胜 · 休息、战败或逃跑重置</p></div></div><div class="stamina-actions"><button class="secondary-button" id="use-stamina" ${blocked||state.energy===100||!state.items[3]?'disabled':''}>${icon('potion')}补充 40 体力 (${state.items[3]})</button><button class="secondary-button" id="explore-rest" ${blocked?'disabled':''}>${icon('moon')}休息回满</button></div>`;
   renderEvent();
   $('#expedition-result').hidden = !lastAdventure;
   $('#expedition-result').textContent = lastAdventure;
   $('#battle-panel').hidden = !b.active;
+  $('#page-explore').classList.toggle('in-combat', b.active);
   if (b.active) {
-    const heavy = b.boss && (b.turn+1)%3===0;
-    const enemy = b.boss ? state.areas[b.area].boss : state.areas[b.area].enemies[b.enemy];
-    $('#battle-panel').innerHTML = `<div class="battle-head"><div><div class="eyebrow">${b.boss?'BOSS ENCOUNTER':'WILDERNESS ENCOUNTER'}</div><h3>${state.areas[b.area].name} · ${enemy}</h3></div><span class="subtle">第 ${b.turn+1} 回合</span></div><div class="battle-intent ${heavy?'danger':''}">${icon(heavy?'flame':'shield')}${heavy?'首领正在蓄力！下一行动将承受双倍重击，防御可将伤害降至约三分之一。':b.boss?'首领下一行动：普通攻击 · 每第三回合重击':'敌人下一行动：普通攻击 · 破空斩可造成双倍伤害'}</div><div class="section-label"><span>敌人生命 ${b.hp} / ${b.maxHp}</span><span>下一击 ${heavy?b.attack*2:b.attack}~${heavy?(b.attack+4)*2:b.attack+4}</span></div><div class="progress enemy-health"><i style="width:${pct(b.hp,b.maxHp)}"></i></div><div class="battle-actions"><button class="primary-button" data-battle="0" ${busy?'disabled':''}>${icon('sword')}攻击</button><button class="skill-button" data-battle="4" ${busy||b.cooldown?'disabled':''}>${icon('star')}${b.cooldown?`破空斩 · 冷却 ${b.cooldown}`:'破空斩 · 双倍伤害'}</button><button class="secondary-button" data-battle="1" ${busy?'disabled':''}>${icon('shield')}防御反击</button><button class="secondary-button" data-battle="2" ${busy||!state.items[0]||state.hp===state.maxHp?'disabled':''}>${icon('potion')}喝药 (${state.items[0]})</button><button class="secondary-button" data-battle="3" ${busy?'disabled':''}>${icon('arrow')}逃跑 · 75%</button></div>`;
+    const heavy = (b.boss||b.elite) && (b.turn+1)%3===0;
+    const enemy = b.elite?'秘境精英':b.boss ? state.areas[b.area].boss : state.areas[b.area].enemies[b.enemy];
+    $('#battle-panel').innerHTML = `<div class="battle-head"><div><div class="eyebrow">${b.elite?'DUNGEON ELITE':b.boss?'BOSS ENCOUNTER':'WILDERNESS ENCOUNTER'}</div><h3>${state.areas[b.area].name} · ${enemy}</h3></div><span class="subtle">第 ${b.turn+1} 回合</span></div><div class="battle-intent ${heavy?'danger':''}">${icon(heavy?'flame':'shield')}${heavy?'首领正在蓄力！下一行动将承受双倍重击，防御可将伤害降至约三分之一。':b.boss?'首领下一行动：普通攻击 · 每第三回合重击':'敌人下一行动：普通攻击 · 破空斩可造成双倍伤害'}</div><div class="section-label"><span>敌人生命 ${b.hp} / ${b.maxHp}</span><span>下一击 ${heavy?b.attack*2:b.attack}~${heavy?(b.attack+4)*2:b.attack+4}</span></div><div class="progress enemy-health"><i style="width:${pct(b.hp,b.maxHp)}"></i></div><div class="combat-hud"><div><span>你的生命</span><b>${state.hp} / ${state.maxHp}</b><div class="progress"><i style="width:${pct(state.hp,state.maxHp)};background:#79d3b1"></i></div></div><div><span>${b.elite?'秘境精英':b.boss?state.areas[b.area].boss:state.areas[b.area].enemies[b.enemy]}</span><b>${b.hp} / ${b.maxHp}</b><div class="progress"><i style="width:${pct(b.hp,b.maxHp)};background:#c383eb"></i></div></div></div><canvas id="combat-canvas" class="game-canvas" aria-label="2D 战斗场景，双方血条位于角色上方"></canvas><p class="combat-feedback" aria-live="polite">${lastAdventure}</p><div class="battle-actions"><button class="primary-button" data-battle="0" ${busy?'disabled':''}>${icon('sword')}攻击</button><button class="skill-button" data-battle="4" ${busy||b.cooldown?'disabled':''}>${icon('star')}${b.cooldown?`破空斩 · 冷却 ${b.cooldown}`:'破空斩 · 双倍伤害'}</button><button class="secondary-button" data-battle="1" ${busy?'disabled':''}>${icon('shield')}防御反击</button><button class="secondary-button" data-battle="2" ${busy||!state.items[0]||state.hp===state.maxHp?'disabled':''}>${icon('potion')}喝药 (${state.items[0]})</button><button class="secondary-button" data-battle="3" ${busy?'disabled':''}>${icon('arrow')}逃跑 · 75%</button></div>`;
+    Forge2D.attach($('#combat-canvas'),'battle');
   }
 }
 
@@ -211,19 +248,21 @@ function renderInventory() {
   const {weapon: w, index} = selectedWeapon();
   let weapons = state.weapons.map((weapon, index) => ({...weapon, index})).filter(weapon => weapon.rarity >= filter);
   weapons.sort(sort === 'attack' ? (a,b) => b.attack-a.attack : (a,b) => b.id-a.id);
-  $('#weapon-grid').innerHTML = weapons.length ? weapons.map(weapon => `<button class="weapon-card ${weapon.id === weaponId ? 'selected' : ''}" style="--rarity:${colors[weapon.rarity]}" data-weapon="${weapon.id}">${weapon.index === state.equipped ? '<small>已装备</small>':''}${swordArt(weapon.recipe,weapon.rarity)}<b>${state.recipes[weapon.recipe].name} +${weapon.upgrade}</b><p>${rarityNames[weapon.rarity]} · 攻击 ${weapon.attack}</p></button>`).join('') : '<div class="empty-state">尚未收集到这个品质的武器。<br>继续锻造，下一把或许就是传奇。</div>';
+  for(const id of batchIds)if(!state.weapons.some((v,i)=>v.id===id&&i!==state.equipped))batchIds.delete(id);
+  renderBatch();
+  $('#weapon-grid').innerHTML = weapons.length ? weapons.map(weapon => `<button class="weapon-card ${(batchMode ? batchIds.has(weapon.id) : weapon.id === weaponId) ? 'selected' : ''}" style="--rarity:${colors[weapon.rarity]}" data-weapon="${weapon.id}" ${batchMode&&weapon.index===state.equipped?'disabled':''} aria-pressed="${batchMode?batchIds.has(weapon.id):weapon.id===weaponId}">${batchMode?`<span class="batch-check">${batchIds.has(weapon.id)?'✓':'○'}</span>`:''}${weapon.index === state.equipped ? '<small>已装备</small>':''}${swordArt(weapon.recipe,weapon.rarity)}<b>${state.recipes[weapon.recipe].name} +${weapon.upgrade}</b><p>${rarityNames[weapon.rarity]} · 攻击 ${weapon.attack}</p></button>`).join('') : '<div class="empty-state">尚未收集到这个品质的武器。<br>继续锻造，下一把或许就是传奇。</div>';
   if (!w) return;
-  const locked = busy || state.battle.active || state.event.kind >= 0 || state.corrupted;
+  const locked = busy || state.battle.active || state.delve.active || state.event.kind >= 0 || state.corrupted;
   const cannotUpgrade = locked || w.upgrade >= 10 || state.gold < w.cost || state.materials[0] < w.iron || (protectedUpgrade && !state.items[2]);
   $('#weapon-detail').style.setProperty('--rarity',colors[w.rarity]);
-  $('#weapon-detail').innerHTML = `<div class="eyebrow">BLADE NO. ${String(w.id).padStart(3,'0')}</div>${swordArt(w.recipe,w.rarity)}<h2>${state.recipes[w.recipe].name}</h2><p class="rarity-label">${rarityNames[w.rarity]}品质 · ${w.upgrade ? `强化 +${w.upgrade}` : '未经强化'}</p><div class="weapon-facts"><div><p>武器攻击</p><b>${w.attack}</b></div><div><p>强化等级</p><b>+${w.upgrade}<small style="font-size:11px;color:#888"> / 10</small></b></div></div><button class="primary-button" id="equip-button" ${locked || index === state.equipped ? 'disabled':''}>${icon('sword')}${index === state.equipped ? '已装备此武器' : '装备武器'}</button><button class="secondary-button" id="upgrade-button" ${cannotUpgrade ? 'disabled':''}>${icon('forge')}${w.upgrade === 10 ? '已达到最高强化' : `强化 · ${w.cost} 金币 / ${w.iron} 铁矿`}</button><p class="upgrade-info">${w.upgrade === 10 ? '炉火淬炼，锋芒已至巅峰。' : `成功率 ${w.chance}% · 失败降 1 级（最低 +0）<br>资源不足时强化按钮会暂时关闭`}</p><label class="protect-toggle"><input type="checkbox" id="protect-toggle" ${protectedUpgrade ? 'checked':''} ${!state.items[2] || locked ? 'disabled':''}>使用保护符（持有 ${state.items[2]} 张）</label><button class="salvage-button" id="salvage-button" ${locked || index === state.equipped ? 'disabled':''}>回收武器 · 获得 ${2+w.rarity} 铁矿与 ${10+w.rarity*12+w.upgrade*4} 金币</button>`;
+  $('#weapon-detail').innerHTML = `<div class="eyebrow">BLADE NO. ${String(w.id).padStart(3,'0')}</div>${swordArt(w.recipe,w.rarity)}<h2>${state.recipes[w.recipe].name}</h2><p class="rarity-label">${rarityNames[w.rarity]}品质 · ${w.upgrade ? `强化 +${w.upgrade}` : '未经强化'}</p><div class="weapon-facts"><div><p>武器攻击</p><b>${w.attack}</b></div><div><p>强化等级</p><b>+${w.upgrade}<small style="font-size:11px;color:#888"> / 10</small></b></div></div><button class="primary-button" id="equip-button" ${locked || index === state.equipped ? 'disabled':''}>${icon('sword')}${index === state.equipped ? '已装备此武器' : '装备武器'}</button><button class="secondary-button" id="upgrade-button" ${cannotUpgrade ? 'disabled':''}>${icon('forge')}${w.upgrade === 10 ? '已达到最高强化' : `前往升级台 · ${w.cost} 金币 / ${w.iron} 铁矿`}</button><p class="upgrade-info">${w.upgrade === 10 ? '炉火淬炼，锋芒已至巅峰。' : `成功率 ${w.chance}% · 失败降 1 级（最低 +0）<br>资源不足时强化按钮会暂时关闭`}</p><label class="protect-toggle"><input type="checkbox" id="protect-toggle" ${protectedUpgrade ? 'checked':''} ${!state.items[2] || locked ? 'disabled':''}>使用保护符（持有 ${state.items[2]} 张）</label><button class="salvage-button" id="salvage-button" ${locked || index === state.equipped ? 'disabled':''}>回收武器 · 获得 ${2+w.rarity} 铁矿与 ${10+w.rarity*12+w.upgrade*4} 金币</button>`;
 }
 
 function renderShop() {
   const names = ['治疗药水','幸运符','保护符','体力药水'], prices = [20,65,90,35];
   const descriptions = ['恢复 55 点生命，不超过生命上限。<br>也可在战斗中使用。','单次锻造提升高品质概率。<br>让史诗与传说离你更近。','单次强化失败时保住等级。<br>无论成功失败都消耗一张。','恢复 40 体力，最高 100。<br>保留连续探索奖励，继续冒险。'];
   const previous = [0,1,2,3].map(i => $(`#quantity-${i}`)?.value || '1');
-  $('#shop-list').innerHTML = names.map((name,i) => `<article class="panel shop-card" style="--color:${['#d4968a','#dfc18b','#a8bfd8','#83bca3'][i]}"><div class="shop-art">${icon(['potion','star','shield','potion'][i])}</div><h3>${name}</h3><p>${descriptions[i]}</p><div class="owned">当前持有 ${amount(state.items[i])} ${i === 0 || i === 3 ? '瓶':'张'}</div><label>购买数量 <input type="number" id="quantity-${i}" data-quantity="${i}" min="1" max="99" step="1" value="${previous[i]}"></label><button class="primary-button" data-buy="${i}" ${busy || state.battle.active || state.event.kind >= 0 || state.corrupted || state.gold < prices[i]*Number(previous[i]) ? 'disabled':''}>${icon('coin')}购入 · ${prices[i]*Number(previous[i])} 金币</button></article>`).join('');
+  $('#shop-list').innerHTML = names.map((name,i) => `<article class="panel shop-card" style="--color:${['#d4968a','#dfc18b','#a8bfd8','#83bca3'][i]}"><div class="shop-art">${icon(['potion','star','shield','potion'][i])}</div><h3>${name}</h3><p>${descriptions[i]}</p><div class="owned">当前持有 ${amount(state.items[i])} ${i === 0 || i === 3 ? '瓶':'张'}</div><label>购买数量 <input type="number" id="quantity-${i}" data-quantity="${i}" min="1" max="99" step="1" value="${previous[i]}"></label><button class="primary-button" data-buy="${i}" ${busy || state.battle.active || state.delve.active || state.event.kind >= 0 || state.corrupted || state.gold < prices[i]*Number(previous[i]) ? 'disabled':''}>${icon('coin')}购入 · ${prices[i]*Number(previous[i])} 金币</button></article>`).join('');
 }
 
 function renderJournal() {
@@ -238,39 +277,51 @@ function renderJournal() {
 function render() {
   if (!state) return;
   if (!state.items[2]) protectedUpgrade = false;
-  renderCommon(); renderForge(); renderExplore(); renderInventory(); renderShop(); renderJournal();
+  Forge2D.update(state);
+  window.gameBusyForDelve=busy; renderDelve(); Delve2D.update(state);
+  renderUpgrade(); renderCommon(); renderForge(); renderExplore(); renderInventory(); renderShop(); renderJournal();
 }
 
 async function connect() {
   if (closed) return;
   try {
-    const response = await fetch('/api/state', {cache:'no-store', signal:AbortSignal.timeout(4000)});
+    const response = await gameRequest('/api/state', {cache:'no-store', signal:requestTimeout(4000)});
     if (!response.ok) throw new Error('游戏连接未就绪');
     state = await response.json(); $('#connection-error').hidden = true; render();
+    if(state.delve.active||state.battle.active){switchPage('explore');areaIndex=state.delve.active?state.delve.area:state.battle.area;renderExplore();}
     if (state.event.kind >= 0) {areaIndex=state.event.area; switchPage('explore'); renderExplore();}
     if (state.corrupted) { toast('原存档无法读取，旧文件已保留。请在旅程设置里处理。'); $('#settings-dialog').showModal(); }
   } catch { $('#connection-error').hidden = false; }
 }
 
-async function act(action, p = 0, q = 0) {
+async function act(action, p = 0, q = 0, extra = {}) {
   if (busy || closed || !state) return null;
+  const beforeWeapon=state.weapons[p]?{...state.weapons[p]}:null;
   busy = true; render();
-  if (action === 'forge') { $('#forge-scene').classList.add('forging'); playSound('forge'); }
+  if (action === 'forge') { $('#forge-scene').classList.add('forging'); Forge2D.forge(); playSound('forge'); }
+  if(action==='upgrade'){Forge2D.upgrading();$('#upgrade-result').textContent='符文正在淬炼，请稍候…';playSound('forge');}
   try {
-    const response = await fetch('/api/action', {method:'POST', body:new URLSearchParams({action,p,q}), signal:AbortSignal.timeout(6000)});
+    const response = await gameRequest('/api/action', {method:'POST', body:new URLSearchParams({action,p,q,...extra}), signal:requestTimeout(6000)});
     if (!response.ok) throw new Error('连接异常，请重新启动游戏。');
     const next = await response.json();
-    if (action === 'forge') await new Promise(resolve=>setTimeout(resolve,750));
+    if (next.result===0 && ['forge','upgrade'].includes(action)) await new Promise(resolve=>setTimeout(resolve,1600));
+    if(action==='battle' && next.result===0){Forge2D.hit(next.combat,p);playSound(p===4?'epic':'forge');await new Promise(resolve=>setTimeout(resolve,460));}
     state = next;
-    if (['explore','boss','gather','event','battle'].includes(action)) lastAdventure = state.message;
+    if (['explore','boss','gather','event','battle','delve','delve_room','blessing','delve_leave'].includes(action)) lastAdventure = state.message;
     log(state.message); toast(state.message);
     if (state.result === 0) {
       playSound(action === 'battle' && !state.battle.active ? 'win' : 'click');
       if (action === 'forge') showResult(state.latest);
+      if(action==='upgrade'){const changed=state.weapons.find(w=>w.id===beforeWeapon?.id);Forge2D.upgraded(changed,state.upgradeSuccess===1,!!q);$('#upgrade-result').textContent=state.message;playSound(state.upgradeSuccess===1?(changed?.rarity===4?'legend':changed?.rarity===3?'epic':'win'):'fail');}
+      if(action==='salvage_many'){batchIds.clear();batchMode=false;}
+      if(action==='delve'){switchPage('explore');requestAnimationFrame(()=>$('#delve-panel').scrollIntoView({behavior:'smooth',block:'center'}));}
+      if(action==='delve_room'&&state.battle.active){switchPage('explore');requestAnimationFrame(()=>$('#battle-panel').scrollIntoView({behavior:'smooth',block:'center'}));}
+      if(action==='battle'&&!state.battle.active&&state.delve.active)requestAnimationFrame(()=>$('#delve-panel').scrollIntoView({behavior:'smooth',block:'center'}));
       if (action === 'gather') {switchPage('explore'); requestAnimationFrame(()=>$('#exploration-event').scrollIntoView({behavior:'smooth',block:'center'}));}
       if (action === 'explore' || action === 'boss') { switchPage('explore'); requestAnimationFrame(()=>$('#battle-panel').scrollIntoView({behavior:'smooth',block:'center'})); }
-      if (action === 'new') { recipeIndex = 0; weaponId = null; areaIndex=0; lastAdventure=''; switchPage('forge'); }
+      if (action === 'new' || action === 'slot') { recipeIndex = 0; weaponId = null; upgradeId=null; batchIds.clear(); batchMode=false; areaIndex=0; lastAdventure=''; switchPage(state.event.kind>=0?'explore':'forge'); if(state.event.kind>=0)areaIndex=state.event.area; }
       if (action === 'quit') {
+        if(isAndroid) SwordForgeAndroid.exit();
         closed = true;
         $('#connection-error').hidden = false;
         $('#connection-error h2').textContent = '炉火暂歇，明日再会';
@@ -292,7 +343,9 @@ function showResult(index) {
   weaponId = w.id;
   const dialog = $('#result-dialog');
   dialog.style.borderColor = colors[w.rarity];
-  $('#result-content').innerHTML = `${swordArt(w.recipe,w.rarity)}<p class="rarity-label" style="--rarity:${colors[w.rarity]}">${rarityNames[w.rarity]}品质</p><h3>${state.recipes[w.recipe].name}</h3><div class="result-detail">武器攻击 <b>${w.attack}</b><br>${w.rarity >= 3 ? '炉火间闪过一抹不同寻常的光。' : '新的锋芒，将与你一同踏入荒野。'}</div>`;
+  dialog.dataset.rarity=String(w.rarity); Forge2D.attach($('#reveal-canvas'),'reveal',w);
+  playSound(w.rarity===4?'legend':w.rarity===3?'epic':'win');
+  $('#result-content').innerHTML = `<p class="rarity-label" style="--rarity:${colors[w.rarity]}">${rarityNames[w.rarity]}品质</p><h3>${state.recipes[w.recipe].name}</h3><div class="result-detail">武器攻击 <b>${w.attack}</b><br>${w.rarity >= 3 ? '炉火间闪过一抹不同寻常的光。' : '新的锋芒，将与你一同踏入荒野。'}</div>`;
   dialog.showModal();
 }
 
@@ -312,12 +365,17 @@ document.addEventListener('click', async event => {
   if (button.dataset.page) return switchPage(button.dataset.page);
   if (button.classList.contains('dialog-close')) return button.closest('dialog').close();
   if (button.dataset.recipe !== undefined) { recipeIndex = Number(button.dataset.recipe); renderForge(); playSound(); return; }
-  if (button.dataset.weapon !== undefined) { weaponId = Number(button.dataset.weapon); renderInventory(); return; }
+  if (button.dataset.weapon !== undefined) { const id=Number(button.dataset.weapon);if(batchMode){if(batchIds.has(id))batchIds.delete(id);else batchIds.add(id);}else weaponId=id;renderInventory();return;}
+  if(button.dataset.slot!==undefined){$('#settings-dialog').close();const slot=Number(button.dataset.slot),s=state.slots[slot];if(await confirm(s.exists?'切换旅程？':'创建独立旅程？',`当前进度会自动保存。${s.exists?'读取':'创建'}旅程 ${slot+1}，其他存档保留。`))return act('slot',slot);return;}
   if (button.dataset.filter !== undefined) {
     filter = Number(button.dataset.filter);
     document.querySelectorAll('.filter').forEach(el=>el.classList.toggle('active',el===button));
     renderInventory(); return;
   }
+  if(button.dataset.delve!==undefined)return act('delve',Number(button.dataset.delve));
+  if(button.dataset.delveRoom!==undefined){Delve2D.room(Number(button.dataset.delveRoom),Number(button.dataset.choice||0));return;}
+  if(button.dataset.blessing!==undefined)return act('blessing',Number(button.dataset.blessing));
+  if(button.dataset.delveMove){Delve2D.move(...{up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]}[button.dataset.delveMove]);return;}
   if (button.dataset.area !== undefined) {areaIndex=Number(button.dataset.area); renderExplore(); return;}
   if (button.dataset.gather !== undefined) return act('gather',Number(button.dataset.gather));
   if (button.dataset.boss !== undefined) return act('boss',Number(button.dataset.boss));
@@ -338,10 +396,18 @@ document.addEventListener('click', async event => {
       return act('rest');
     case 'use-stamina': return act('stamina');
     case 'equip-button': return act('equip',index);
-    case 'upgrade-button': return act('upgrade',index,Number(protectedUpgrade));
+    case 'upgrade-button': return openUpgrade(w);
+    case 'station-upgrade': return openUpgrade(w);
+    case 'station-forge': $('#forge-button').scrollIntoView({behavior:'smooth',block:'center'});return;
+    case 'upgrade-start': return act('upgrade',state.weapons.findIndex(v=>v.id===upgradeId),Number(protectedUpgrade));
+    case 'batch-toggle': batchMode=!batchMode;batchIds.clear();renderInventory();return;
+    case 'batch-all': for(const [i,v] of state.weapons.entries())if(i!==state.equipped&&v.rarity>=filter)batchIds.add(v.id);renderInventory();return;
+    case 'batch-clear': batchIds.clear();renderInventory();return;
+    case 'batch-recycle': {const selected=state.weapons.filter(v=>batchIds.has(v.id)),total=batchTotals(selected);if(selected.length&&await confirm('确认批量回收？',`将回收 ${selected.length} 把武器，获得 ${total.iron} 铁矿和 ${total.gold} 金币（至资源上限）。已装备武器不参与；回收后这些武器会被移除。`))return act('salvage_many',0,0,{ids:selected.map(v=>v.id).join('-')});return;}
     case 'salvage-button':
       if (await confirm('让旧剑化作新的可能？',`回收「${state.recipes[w.recipe].name} +${w.upgrade}」将获得 ${2+w.rarity} 铁矿和 ${10+w.rarity*12+w.upgrade*4} 金币。这把武器会从背包中移除。`)) return act('salvage',index);
       return;
+    case 'delve-leave': if(await confirm('撤离秘境？','已获得的材料、金币和道具全部保留；本次楼层、未开启的宝箱和祝福会结束。'))return act('delve_leave');return;
     case 'save-button': return act('save');
     case 'settings-button': return $('#settings-dialog').showModal();
     case 'equip-result': $('#result-dialog').close(); return act('equip',index);
@@ -349,7 +415,7 @@ document.addEventListener('click', async event => {
     case 'confirm-cancel': return finishConfirm(false);
     case 'reconnect-button': return connect();
     case 'sound-button':
-      soundEnabled = !soundEnabled; button.setAttribute('aria-pressed',String(soundEnabled));
+      soundEnabled = !soundEnabled; localStorage.setItem('swordforge-muted',soundEnabled?'0':'1'); button.setAttribute('aria-pressed',String(soundEnabled));
       button.title = soundEnabled ? '关闭音效' : '开启音效'; button.setAttribute('aria-label',button.title);
       playSound('forge'); toast(soundEnabled?'已开启音效':'音效已关闭'); return;
     case 'load-button':
@@ -358,7 +424,7 @@ document.addEventListener('click', async event => {
       return;
     case 'new-button':
       $('#settings-dialog').close();
-      if (await confirm('开启一段全新的旅程？','当前存档会先备份到 saves/game.before-new.sav，然后重置角色、装备和背包。')) return act('new',1);
+      if (await confirm('开启一段全新的旅程？',`只重置旅程 ${state.activeSlot+1}，先备份这个存档。其他旅程不受影响。想保留角色继续游玩，请选择空的存档位。`)) return act('new',1);
       return;
     case 'quit-button': $('#settings-dialog').close(); return act('quit');
   }
@@ -375,5 +441,51 @@ $('#shop-list').addEventListener('input',event=>{
   button.innerHTML=`${icon('coin')}购入 · ${valid?price*n:'—'} 金币`;
   button.disabled=!valid||busy||state.battle.active||state.corrupted||state.gold<price*n;
 });
+
+
+function renderDelve(){
+ const d=state.delve,b=state.battle;$('#delve-panel').hidden=!d.active||b.active;
+ if(!d.active)return;const locked=busy||b.active||d.reward;
+ $('#delve-leave').disabled=busy||b.active;
+ const buffs=['锋锐 +25% 攻击','复苏 胜利回复 25 生命','丰收 +25% 战斗金币'];
+ $('#delve-status').innerHTML=`<b>${state.areas[d.area].name} · 第 ${d.floor} / 3 层</b><span>生命 ${state.hp} / ${state.maxHp} · 体力 ${state.energy} · 已通关 ${d.clears} 次</span><small>${buffs.filter((_,i)=>d.buffs&(1<<i)).join(' / ')||'本次祝福：击败精英后选择'}</small>`;
+ const names=['入口','封存宝箱','疗愈清泉','矿道守卫','秘境精英','下层阶梯'];
+ $('#delve-rooms').innerHTML=names.slice(1).map((name,i)=>{const room=i+1,done=!!(d.visited&(1<<room)),stairs=room===5&&((d.visited&24)!==24);return `<div class="delve-room ${done?'done':''}"><b>${name}</b><small>${done?'已探索 · 奖励已领取':room===3?'胜利获得材料与经验':room===4?'胜利选择一项祝福':room===5?(stairs?'先击败守卫与精英':d.floor===3?'通关并带回锻造礼包':'进入下一张随机地图'):'两种收获任选其一'}</small><div>${room===1||room===2?`<button class="secondary-button" data-delve-room="${room}" data-choice="0" ${locked||done?'disabled':''}>${room===1?'领取材料':'恢复生命'}</button><button class="secondary-button" data-delve-room="${room}" data-choice="1" ${locked||done?'disabled':''}>${room===1?'领取金币':'补充体力'}</button>`:`<button class="secondary-button" data-delve-room="${room}" ${locked||done||stairs?'disabled':''}>${done?'已完成':room===5?'前往阶梯':'前往战斗'}</button>`}</div></div>`;}).join('');
+ $('#delve-rewards').hidden=!d.reward;
+ if(d.reward)$('#delve-rewards').innerHTML=`<h3>精英被击败 · 选择本次探险的祝福</h3><p>持续到离开秘境，可组合不同祝福；已经拥有的祝福不能重复领取。</p><div>${buffs.map((v,i)=>`<button class="primary-button" data-blessing="${i}" ${busy||d.buffs&(1<<i)?'disabled':''}>${v}</button>`).join('')}</div>`;
+}
+window.addEventListener('delve-arrival',e=>{if(!busy&&state.delve.active&&state.delve.seed===e.detail.seed)act('delve_room',e.detail.room,e.detail.choice);});
+
+function renderSlots(){
+  $('#save-slots').innerHTML=(state.slots||[]).map(s=>`<button class="save-slot ${s.slot===state.activeSlot?'active':''}" data-slot="${s.slot}" ${busy||state.battle.active||state.event.kind>=0||s.slot===state.activeSlot?'disabled':''}><b>旅程 ${s.slot+1} ${s.slot===state.activeSlot?'· 当前':''}</b><small>${s.exists?(s.valid?`Lv.${s.level} · 第 ${s.day} 天 · ${s.weapons} 把武器`:'文件无法读取 · 已保留'):'空存档 · 创建新角色'}</small></button>`).join('');
+  $('#new-button small').textContent=`只重置当前旅程 ${state.activeSlot+1} · 先备份`;
+  $('#load-button small').textContent=`读取当前旅程 ${state.activeSlot+1}`;
+}
+function batchTotals(ws){return ws.reduce((a,w)=>({iron:a.iron+2+w.rarity,gold:a.gold+10+w.rarity*12+w.upgrade*4}),{iron:0,gold:0});}
+function renderBatch(){
+  const total=batchTotals(state.weapons.filter(w=>batchIds.has(w.id))),locked=busy||state.battle.active||state.event.kind>=0||state.corrupted;
+  $('#batch-toolbar').innerHTML=`<button class="secondary-button" id="batch-toggle" ${locked?'disabled':''}>${batchMode?'退出批量选择':'批量选择回收'}</button>${batchMode?`<button class="text-button" id="batch-all" ${locked?'disabled':''}>选择当前筛选结果</button><button class="text-button" id="batch-clear" ${locked?'disabled':''}>清空</button><span>已选 ${batchIds.size} 把 · ${total.iron} 铁矿 / ${total.gold} 金币</span><button class="primary-button" id="batch-recycle" ${locked||!batchIds.size?'disabled':''}>回收所选</button>`:'<span>按武器编号选择 · 已装备的武器会被保护</span>'}`;
+}
+function openUpgrade(w){
+  if(busy||state.battle.active||state.delve.active||state.event.kind>=0||state.corrupted)return toast('请先完成当前战斗或事件。');
+  if(!w)return;upgradeId=w.id;Forge2D.upgrade(w);$('#upgrade-result').textContent='选择是否使用保护符，然后让符文重铸锋芒。';renderUpgrade();$('#upgrade-dialog').showModal();
+}
+function renderUpgrade(){
+  const w=state.weapons.find(v=>v.id===upgradeId);if(!w){$('#upgrade-start').disabled=true;return;}
+  const blocked=busy||state.battle.active||state.event.kind>=0||state.corrupted||w.upgrade>=10||state.gold<w.cost||state.materials[0]<w.iron||protectedUpgrade&&!state.items[2];
+  $('#upgrade-dialog').dataset.rarity=String(w.rarity);
+  $('#upgrade-detail').innerHTML=`<b>${state.recipes[w.recipe].name} +${w.upgrade}</b><span>${rarityNames[w.rarity]} · 攻击 ${w.attack} · 成功率 ${w.chance}%</span><small>${w.cost} 金币 / ${w.iron} 铁矿 · 持有 ${state.gold} 金币 / ${state.materials[0]} 铁矿</small><label class="protect-toggle"><input id="altar-protect" type="checkbox" ${protectedUpgrade?'checked':''} ${busy||!state.items[2]?'disabled':''}> 使用保护符（${state.items[2]} 张）</label>`;
+  $('#upgrade-start').disabled=blocked;$('#upgrade-start').textContent=busy?'正在强化…':w.upgrade>=10?'已强化至 +10':'开始强化';
+}
+$('#upgrade-detail').addEventListener('change',e=>{if(e.target.id==='altar-protect'){protectedUpgrade=e.target.checked;renderUpgrade();renderInventory();}});
+window.addEventListener('station',e=>{if(e.detail==='upgrade')openUpgrade(selectedWeapon().weapon);else if(e.detail==='explore')switchPage('explore');else $('#forge-button').scrollIntoView({behavior:'smooth',block:'center'});});
+
 setInterval(()=>{if(!busy&&!closed)connect();},20000);
 connect();
+
+if(isAndroid) {
+  $('#settings-dialog>p').textContent='四段独立旅程保存在手机应用内，更新安装可保留进度。';
+  $('.settings-footnote').textContent='全部玩法离线运行。切换到后台自动保存，手机返回键可以关闭弹窗或退出。';
+  $('#new-button small').textContent='先备份手机上的存档，再创建新角色';
+  $('#connection-error p').textContent='请关闭并重新打开剑炉物语应用，继续你的旅程。';
+}
